@@ -22,14 +22,15 @@ const DATA_BUFFER_LEN= 100
 type t_scanType byte
 
 const (
-  r_var         t_scanType = iota
+  r_data         t_scanType = iota
   r_status      t_scanType = iota //in str
   r_debug       t_scanType = iota //in str
 )
 
 
 var opt_d bool= false
-var opt_D bool= false
+var opt_r bool= false
+var opt_i string
 
 var db *sql.DB=nil
 var db_ok bool=false
@@ -60,6 +61,8 @@ const (
 type t_workStruct struct {
   c_id          int
   c_connect     string
+  c_serial      string
+  c_type        string
   wg            *sync.WaitGroup
   control_ch    chan string
   data_ch       chan t_scanData
@@ -70,14 +73,14 @@ type t_workStruct struct {
 func main() {
 
   var f_opt_d *bool = flag.Bool("d", opt_d, "Debug output")
-  var f_opt_D *bool = flag.Bool("D", opt_d, "Debug mikrotik commands and answers")
   var f_opt_r *bool = flag.Bool("r", opt_r, "Read only mode (do not update mysql tables)")
   var f_opt_i *string = flag.String("i", opt_i, "Work only this IP")
+
+  ip_regex := regexp.MustCompile("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$")
 
   flag.Parse()
 
   opt_d = *f_opt_d
-  opt_D = *f_opt_D
   opt_r = *f_opt_r
   opt_i = *f_opt_i
 
@@ -101,7 +104,6 @@ MAIN_LOOP: for { //main loop
     //if(opt_d) { logMessage("main", "Cycle start") }
 
     if(!db_ok && db != nil) {
-      cleanStmts()
       db.Close()
       db=nil
     }
@@ -126,7 +128,6 @@ MAIN_LOOP: for { //main loop
         logError("main", err.Error())
         setStatus("DB Ping error: "+err.Error())
         db_ok=false
-        cleanStmts();
         db.Close()
         db = nil
       } else {
@@ -136,7 +137,7 @@ MAIN_LOOP: for { //main loop
 
     if(db_ok) {
       //query cs table to check for new/paused cs
-      query := "SELECT c_id, c_connect, c_serial, c_type FROM cs WHERE c_paused = 0 AND c_type = 'gost-c-electro-1p'"
+      query := "SELECT c_id, c_connect, c_serial, c_type FROM cs WHERE c_paused = 0 AND c_deleted = 0 AND c_type = 'gost-c-electro-1p'"
       if( opt_i != "" && ip_regex.MatchString(opt_i)) {
         query += " AND c_connect LIKE '"+opt_i+":%'"
       }
@@ -183,6 +184,8 @@ MAIN_LOOP: for { //main loop
               workers[db_c_id]=t_workStruct{
                 c_id:       db_c_id,
                 c_connect:       db_c_connect,
+                c_serial:        db_c_serial,
+                c_type:          db_c_type,
                 wg:     &wg,
                 control_ch: make(chan string, 1),
                 data_ch:        data_ch,
@@ -236,6 +239,8 @@ MAIN_LOOP: for { //main loop
       }
       //we've got data
 
+      ts := time.Now().Unix()
+
       wd,we := workers[data.c_id]
       if(we && wd.added==data.added) {
         if(!opt_r) {
@@ -262,33 +267,9 @@ MAIN_LOOP: for { //main loop
                 workers[data.c_id].control_ch <- c_stop
                 close(workers[data.c_id].control_ch)
                 delete(workers, data.c_id)
-                _, err =db.Exec("UPDATE cs SET c_status='ERROR: wrong serial change', c_status_time=UNIX_TIMESTAMP(), ts=ts WHERE c_id=?", data.c_id)
+                _, err =db.Exec("UPDATE cs SET c_error='Wrong serial', c_last_error=?, ts=? WHERE c_id=?", ts, ts, data.c_id)
               } else {
-                _, err =db.Exec("UPDATE cs SET c_status='WARN: serial change', c_status_time=UNIX_TIMESTAMP(), ts=ts, c_serial=? WHERE c_id=?", data.str, data.c_id)
-              }
-              if( err != nil) {
-                logError("main", err.Error())
-                setStatus("DB UPDATE error: "+err.Error())
-                db_ok=false
-              }
-            }
-          } else if(data.ret_type == r_status) {
-            traf_period := time.Now().Format("20060102")
-            _, err =db.Exec("INSERT INTO cs_traffic SET rt_fk_c_id=?, rt_period=?, rt_bytes_in=?, rt_bytes_out=? ON DUPLICATE KEY UPDATE rt_bytes_in=rt_bytes_in+VALUES(rt_bytes_in), rt_bytes_out=rt_bytes_out+VALUES(rt_bytes_out)", data.c_id, traf_period, data.traff_in, data.traff_out)
-            if( err != nil) {
-              logError("main", err.Error())
-              setStatus("DB error: "+err.Error())
-              db_ok=false
-            } else {
-
-              //prc_str := fmt.Sprintf(", avg: %.0f/%.0f/%.0f", data.time_percents.perc_connect, data.time_percents.perc_work, data.time_percents.perc_error)
-              prc_str := ""
-              if(data.ok) {
-                //fmt.Println("Got status from",data.c_id,data.str,"Status")
-                _, err =db.Exec("UPDATE cs SET c_status=?, c_status_time=UNIX_TIMESTAMP(), c_last_ok_time=UNIX_TIMESTAMP(), ts=ts WHERE c_id=?", data.str+prc_str, data.c_id)
-              } else {
-                fmt.Fprintln(os.Stderr, "Got error from",data.c_id,data.str,"Status")
-                _, err =db.Exec("UPDATE cs SET c_status=?, c_status_time=UNIX_TIMESTAMP(), ts=ts WHERE c_id=?", data.str+prc_str, data.c_id)
+                _, err =db.Exec("UPDATE cs SET ts=?, c_serial=?, c_change_by = 'daemon'  WHERE c_id=?", ts, data.str, data.c_id)
               }
               if( err != nil) {
                 logError("main", err.Error())
