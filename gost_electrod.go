@@ -22,8 +22,9 @@ const DATA_BUFFER_LEN= 100
 type t_scanType byte
 
 const (
-  r_data         t_scanType = iota
-  r_status      t_scanType = iota //in str
+  r_data        t_scanType = iota
+  r_serial      t_scanType = iota //in str
+  r_error       t_scanType = iota //in str
   r_debug       t_scanType = iota //in str
 )
 
@@ -45,9 +46,8 @@ type t_timePercents struct {
 type t_scanData struct {
   ret_type      t_scanType
   c_id          int
-  name          string
+  data          map[string]string
   str           string
-  ok            bool
   added         time.Time
   time_percents t_timePercents
   traff_in      uint64
@@ -261,12 +261,9 @@ MAIN_LOOP: for { //main loop
           } else if(data.ret_type == r_serial) {
             fmt.Println("Got serial from",data.c_id,data.str)
 
-            if(workers[data.c_id].serial != data.str) {
-              if(workers[data.c_id].serial != "auto") {
+            if(workers[data.c_id].c_serial != data.str) {
+              if(workers[data.c_id].c_serial != "auto") {
                 //some weird stuff happened
-                workers[data.c_id].control_ch <- c_stop
-                close(workers[data.c_id].control_ch)
-                delete(workers, data.c_id)
                 _, err =db.Exec("UPDATE cs SET c_error='Wrong serial', c_last_error=?, ts=? WHERE c_id=?", ts, ts, data.c_id)
               } else {
                 _, err =db.Exec("UPDATE cs SET ts=?, c_serial=?, c_change_by = 'daemon'  WHERE c_id=?", ts, data.str, data.c_id)
@@ -276,7 +273,15 @@ MAIN_LOOP: for { //main loop
                 setStatus("DB UPDATE error: "+err.Error())
                 db_ok=false
               }
+              if err == nil && workers[data.c_id].c_serial == "auto" {
+                workers[data.c_id].c_serial = data.str
+              }
+              // restart worker anyway, it will not continue working until its serial match database
+              workers[data.c_id].control_ch <- c_stop
+              close(workers[data.c_id].control_ch)
+              delete(workers, data.c_id)
             }
+          } else if(data.ret_type == r_serial) {
           } else {
             if(data.ok) {
               fmt.Println("Got data from",data.c_id,data.str)
