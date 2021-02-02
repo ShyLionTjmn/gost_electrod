@@ -30,6 +30,7 @@ const (
 
 
 var opt_d bool= false
+var opt_D bool= false
 var opt_r bool= false
 var opt_i string
 
@@ -61,6 +62,9 @@ const (
 type t_workStruct struct {
   c_id          int
   c_connect     string
+  c_ip          string
+  c_port        string
+  c_address     string
   c_serial      string
   c_type        string
   wg            *sync.WaitGroup
@@ -73,14 +77,17 @@ type t_workStruct struct {
 func main() {
 
   var f_opt_d *bool = flag.Bool("d", opt_d, "Debug output")
+  var f_opt_D *bool = flag.Bool("D", opt_D, "Debug packet output")
   var f_opt_r *bool = flag.Bool("r", opt_r, "Read only mode (do not update mysql tables)")
   var f_opt_i *string = flag.String("i", opt_i, "Work only this IP")
 
   ip_regex := regexp.MustCompile("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$")
+  connect_regex := regexp.MustCompile("^([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}):([0-9]{1,5})(?:/([0-9a-zA-Z]+))?$")
 
   flag.Parse()
 
   opt_d = *f_opt_d
+  opt_D = *f_opt_D
   opt_r = *f_opt_r
   opt_i = *f_opt_i
 
@@ -181,19 +188,29 @@ MAIN_LOOP: for { //main loop
               } else {
                 if(opt_d) { logMessage("main", "c",db_c_id," appeared, ip:",db_c_connect,", start") }
               };
-              workers[db_c_id]=t_workStruct{
-                c_id:       db_c_id,
-                c_connect:       db_c_connect,
-                c_serial:        db_c_serial,
-                c_type:          db_c_type,
-                wg:     &wg,
-                control_ch: make(chan string, 1),
-                data_ch:        data_ch,
-                check: cycle_start,
-                added: time.Now(),
+
+              matches := connect_regex.FindStringSubmatch(db_c_connect)
+              if matches != nil {
+                workers[db_c_id]=t_workStruct{
+                  c_id:       db_c_id,
+                  c_connect:       db_c_connect,
+                  c_ip:            matches[1],
+                  c_port:          matches[2],
+                  c_address:       matches[3],
+                  c_serial:        db_c_serial,
+                  c_type:          db_c_type,
+                  wg:     &wg,
+                  control_ch: make(chan string, 1),
+                  data_ch:        data_ch,
+                  check: cycle_start,
+                  added: time.Now(),
+                }
+
+                wg.Add(1)
+                go worker(workers[db_c_id])
+              } else {
+                logError("main", "Bad connect string for: ",db_c_id," :",db_c_connect)
               }
-              wg.Add(1)
-              go worker(workers[db_c_id])
             }
           }
         }
@@ -252,11 +269,26 @@ MAIN_LOOP: for { //main loop
               logError("main", err.Error())
               if(db_err != nil) {
                 logError("main: Data Process DB error:", err.Error())
+              } else {
+                _, db_err =db.Exec("UPDATE cs SET c_error=?, c_last_error=? WHERE c_id=?", err.Error(), ts, data.c_id)
+                if( db_err != nil) {
+                  logError("main", err.Error())
+                  setStatus("DB UPDATE error: "+err.Error())
+                  db_ok=false
+                }
               }
               setStatus("Data Process error: "+err.Error())
             }
             if( db_err != nil) {
               db_ok=false
+            }
+            if err == nil && db_err == nil {
+              _, err =db.Exec("UPDATE cs SET c_last_ok=? WHERE c_id=?", ts, data.c_id)
+              if( err != nil) {
+                logError("main", err.Error())
+                setStatus("DB UPDATE error: "+err.Error())
+                db_ok=false
+              }
             }
           } else if(data.ret_type == r_serial) {
             fmt.Println("Got serial from",data.c_id,data.str)
@@ -264,7 +296,7 @@ MAIN_LOOP: for { //main loop
             if(workers[data.c_id].c_serial != data.str) {
               if(workers[data.c_id].c_serial != "auto") {
                 //some weird stuff happened
-                _, err =db.Exec("UPDATE cs SET c_error='Wrong serial', c_last_error=?, ts=? WHERE c_id=?", ts, ts, data.c_id)
+                _, err =db.Exec("UPDATE cs SET c_error='Wrong serial', c_last_error=? WHERE c_id=?", ts, data.c_id)
               } else {
                 _, err =db.Exec("UPDATE cs SET ts=?, c_serial=?, c_change_by = 'daemon'  WHERE c_id=?", ts, data.str, data.c_id)
               }
@@ -274,30 +306,35 @@ MAIN_LOOP: for { //main loop
                 db_ok=false
               }
               if err == nil && workers[data.c_id].c_serial == "auto" {
-                workers[data.c_id].c_serial = data.str
+                ws := workers[data.c_id]
+                ws.c_serial = data.str
+                workers[data.c_id] = ws
               }
               // restart worker anyway, it will not continue working until its serial match database
               workers[data.c_id].control_ch <- c_stop
               close(workers[data.c_id].control_ch)
               delete(workers, data.c_id)
             }
-          } else if(data.ret_type == r_serial) {
-          } else {
-            if(data.ok) {
-              fmt.Println("Got data from",data.c_id,data.str)
-            } else {
-              fmt.Fprintln(os.Stderr, "Got data from",data.c_id,data.str)
+          } else if(data.ret_type == r_error) {
+            // worker had problem, report it
+            _, err =db.Exec("UPDATE cs SET c_error=?, c_last_error=? WHERE c_id=?", data.str, ts, data.c_id)
+            if( err != nil) {
+              logError("main", err.Error())
+              setStatus("DB UPDATE error: "+err.Error())
+              db_ok=false
             }
+          } else {
+            fmt.Println("Got something from %d: %v\n", data.c_id, data)
           }
         } else {
           if(data.ret_type == r_data) {
-            if(opt_d) { fmt.Printf("Got Data from %d: %s = %s\n", data.c_id,data.name,data.str) }
+            if(opt_d) { fmt.Printf("Got Data from %d: %v\n", data.c_id ,data.data) }
           } else if(data.ret_type == r_serial) {
-            if(opt_d) { fmt.Println("Got serial from",data.c_id,data.str) }
-          } else if(data.ret_type == r_status) {
-            if(opt_d) { fmt.Println("Got status from", data.c_id, "traff_in:", data.traff_in, "traff_out:", data.traff_out, "\n\t", data.str) }
+            if(opt_d) { fmt.Printf("Got serial from %d: %s\n", data.c_id, data.str) }
+          } else if(data.ret_type == r_error) {
+            if(opt_d) { fmt.Printf("Got error from %d: %s\n", data.c_id, data.str) }
           } else {
-            if(opt_d) { fmt.Println("Got data from",data.c_id,"ok?", data.ok, data.str) }
+            if(opt_d) { fmt.Println("Got something from %d: %v\n", data.c_id, data) }
           }
         }
       } else {
