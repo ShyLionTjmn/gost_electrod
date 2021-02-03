@@ -39,60 +39,95 @@ MAIN_CYCLE:
 
     err_str = ""
 
+    if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "connect") }
+
     err = dev.Connect()
     if err != nil {
       if err.Error() == "exit signalled" { break MAIN_CYCLE }
       err_str = "Connect error: "+err.Error()
+    } else {
+      if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "model:", dev.Maker, dev.Model) }
+      result_map["_model_"] = dev.Maker+" "+dev.Model
     }
 
     if err_str == "" {
       _, err = dev.ReadMessage()
       if err != nil {
         if err.Error() == "exit signalled" { break MAIN_CYCLE }
-        err_str = "Connect error: "+err.Error()
+        err_str = "Post-connect read error: "+err.Error()
+      } else {
       }
     }
 
     // read serial
     if err_str == "" {
+      if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "read serial") }
+
       qres, err = dev.Query("R1", "SNUMB()")
       if err != nil {
         if err.Error() == "exit signalled" { break MAIN_CYCLE }
         err_str = "Query error: "+err.Error()
+      } else {
       }
     }
 
     // check serial in qres.Body
 
+    if err_str == "" {
+      if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "readed serial:", qres.Body) }
+      matches := snumb_regex.FindStringSubmatch(qres.Body)
+      if matches == nil || len(matches) != 2 {
+        err_str = "Cannot extract serial from reply: "+qres.Body
+      } else {
+        if ws.c_serial != matches[1] {
+          // serial mismatch, send to main thread and wait for relaunch
+          if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "sending serial to main thread") }
+          ws.data_ch <- t_scanData{c_id: ws.c_id, str: matches[1], ret_type: r_serial, added: ws.added}
+          err_str = "Serial mismatch"
+        }
+      }
+    }
     //
 
     // fetch data
 
     for _, cmd := range commands {
       if err_str == "" {
+        if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "query:", cmd) }
         qres, err = dev.Query("R1", cmd)
         if err != nil {
           if err.Error() == "exit signalled" { break MAIN_CYCLE }
           err_str = "Query error: "+err.Error()
+        } else {
+          if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "reply:", qres.Body) }
+          result_map[cmd] = qres.Body
         }
-        result_map[cmd] = qres.Body
       }
     }
 
     if dev.Connected {
       dev.Close()
+      if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "closing") }
     }
 
     if err_str == "" {
+      if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "sending data to main thread") }
       ws.data_ch <- t_scanData{c_id: ws.c_id, data: result_map, ret_type: r_data, added: ws.added}
     } else {
+      if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "error:", err_str) }
       ws.data_ch <- t_scanData{c_id: ws.c_id, str: err_str, ret_type: r_error, added: ws.added}
     }
 
     elapsed = time.Now().Sub( cycle_start )
 
-    timer = time.NewTimer( SCAN_INTERVAL - elapsed )
+    if err_str == "Serial mismatch" {
+      timer = time.NewTimer( 24*time.Hour )
+    } else {
+      timer = time.NewTimer( SCAN_INTERVAL - elapsed )
+    }
     time.Sleep(time.Millisecond)
+
+    if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "sleeping") }
 
     select {
       case cmd, ok := <-ws.control_ch:
@@ -114,4 +149,5 @@ MAIN_CYCLE:
         //no quit command, go-on
     }
   }
+  if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "quit") }
 }

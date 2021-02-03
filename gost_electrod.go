@@ -74,6 +74,8 @@ type t_workStruct struct {
   added         time.Time
 }
 
+var snumb_regex *regexp.Regexp
+
 func main() {
 
   var f_opt_d *bool = flag.Bool("d", opt_d, "Debug output")
@@ -83,6 +85,7 @@ func main() {
 
   ip_regex := regexp.MustCompile("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$")
   connect_regex := regexp.MustCompile("^([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}):([0-9]{1,5})(?:/([0-9a-zA-Z]+))?$")
+  snumb_regex = regexp.MustCompile("^SNUMB\\(([0-9a-zA-Z]+)\\)\r\n$")
 
   flag.Parse()
 
@@ -161,6 +164,7 @@ MAIN_LOOP: for { //main loop
           var db_c_connect string
           var db_c_serial string
           var db_c_type string
+          var db_c_tz string
           err := rows.Scan(&db_c_id, &db_c_connect, &db_c_serial, &db_c_type)
           if( err != nil ) {
             logError("main", err.Error())
@@ -264,7 +268,7 @@ MAIN_LOOP: for { //main loop
           var err error
 
           if(data.ret_type == r_data) {
-            err,db_err := processData(data)
+            err,db_err := processData(data, wd)
             if( err != nil) {
               logError("main", err.Error())
               if(db_err != nil) {
@@ -294,26 +298,19 @@ MAIN_LOOP: for { //main loop
             fmt.Println("Got serial from",data.c_id,data.str)
 
             if(workers[data.c_id].c_serial != data.str) {
-              if(workers[data.c_id].c_serial != "auto") {
-                //some weird stuff happened
-                _, err =db.Exec("UPDATE cs SET c_error='Wrong serial', c_last_error=? WHERE c_id=?", ts, data.c_id)
+              if(workers[data.c_id].c_serial == "auto") {
+                _, err =db.Exec("UPDATE cs SET ts=?, c_serial=?, change_by = 'daemon'  WHERE c_id=?", ts, data.str, data.c_id)
+                if( err != nil) {
+                  logError("main", err.Error())
+                  setStatus("DB UPDATE error: "+err.Error())
+                  db_ok=false
+                } else {
+                  // worker will be restarted later
+                }
               } else {
-                _, err =db.Exec("UPDATE cs SET ts=?, c_serial=?, c_change_by = 'daemon'  WHERE c_id=?", ts, data.str, data.c_id)
+                //some weird stuff happened
+                //do nothing, worker will send error, no point to restart it, as serial wont fix himself
               }
-              if( err != nil) {
-                logError("main", err.Error())
-                setStatus("DB UPDATE error: "+err.Error())
-                db_ok=false
-              }
-              if err == nil && workers[data.c_id].c_serial == "auto" {
-                ws := workers[data.c_id]
-                ws.c_serial = data.str
-                workers[data.c_id] = ws
-              }
-              // restart worker anyway, it will not continue working until its serial match database
-              workers[data.c_id].control_ch <- c_stop
-              close(workers[data.c_id].control_ch)
-              delete(workers, data.c_id)
             }
           } else if(data.ret_type == r_error) {
             // worker had problem, report it
