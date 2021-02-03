@@ -32,6 +32,8 @@ func worker(ws t_workStruct) {
 
   var timer *time.Timer
 
+  var first_cycle = true
+
 MAIN_CYCLE:
   for {
 
@@ -113,7 +115,7 @@ MAIN_CYCLE:
     if err_str == "" {
       if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "sending data to main thread") }
       ws.data_ch <- t_scanData{c_id: ws.c_id, data: result_map, ret_type: r_data, added: ws.added}
-    } else {
+    } else if !first_cycle || err_str == "Serial mismatch" {
       if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "error:", err_str) }
       ws.data_ch <- t_scanData{c_id: ws.c_id, str: err_str, ret_type: r_error, added: ws.added}
     }
@@ -148,6 +150,7 @@ MAIN_CYCLE:
       case <-timer.C:
         //no quit command, go-on
     }
+    if first_cycle { first_cycle = false }
   }
   if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "quit") }
 }

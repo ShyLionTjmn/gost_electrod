@@ -67,11 +67,13 @@ type t_workStruct struct {
   c_address     string
   c_serial      string
   c_type        string
+  c_tz          string
   wg            *sync.WaitGroup
   control_ch    chan string
   data_ch       chan t_scanData
   check         time.Time
   added         time.Time
+  location      *time.Location
 }
 
 var snumb_regex *regexp.Regexp
@@ -147,7 +149,7 @@ MAIN_LOOP: for { //main loop
 
     if(db_ok) {
       //query cs table to check for new/paused cs
-      query := "SELECT c_id, c_connect, c_serial, c_type FROM cs WHERE c_paused = 0 AND c_deleted = 0 AND c_type = 'gost-c-electro-1p'"
+      query := "SELECT c_id, c_connect, c_serial, c_type, c_tz FROM cs WHERE c_paused = 0 AND c_deleted = 0 AND c_type = 'gost-c-electro-1p'"
       if( opt_i != "" && ip_regex.MatchString(opt_i)) {
         query += " AND c_connect LIKE '"+opt_i+":%'"
       }
@@ -165,7 +167,7 @@ MAIN_LOOP: for { //main loop
           var db_c_serial string
           var db_c_type string
           var db_c_tz string
-          err := rows.Scan(&db_c_id, &db_c_connect, &db_c_serial, &db_c_type)
+          err := rows.Scan(&db_c_id, &db_c_connect, &db_c_serial, &db_c_type, &db_c_tz)
           if( err != nil ) {
             logError("main", err.Error())
             setStatus("DB Scan error: "+err.Error())
@@ -177,6 +179,7 @@ MAIN_LOOP: for { //main loop
                db_c_connect == workers[db_c_id].c_connect &&
                db_c_serial == workers[db_c_id].c_serial &&
                db_c_type == workers[db_c_id].c_type &&
+               db_c_tz == workers[db_c_id].c_tz &&
             true) {
               //refresh worker data
               ws := workers[db_c_id]
@@ -195,25 +198,35 @@ MAIN_LOOP: for { //main loop
 
               matches := connect_regex.FindStringSubmatch(db_c_connect)
               if matches != nil {
-                workers[db_c_id]=t_workStruct{
-                  c_id:       db_c_id,
-                  c_connect:       db_c_connect,
-                  c_ip:            matches[1],
-                  c_port:          matches[2],
-                  c_address:       matches[3],
-                  c_serial:        db_c_serial,
-                  c_type:          db_c_type,
-                  wg:     &wg,
-                  control_ch: make(chan string, 1),
-                  data_ch:        data_ch,
-                  check: cycle_start,
-                  added: time.Now(),
-                }
+                time_location, time_err := time.LoadLocation(db_c_tz)
+                if time_err != nil {
+                  ts := time.Now().Unix()
+                  db.Exec("UPDATE cs SET c_error=?, c_last_error=? WHERE c_id=?", "Time zone load error: "+time_err.Error(), ts, db_c_id)
+                } else {
+                  workers[db_c_id]=t_workStruct{
+                    c_id:            db_c_id,
+                    c_connect:       db_c_connect,
+                    c_ip:            matches[1],
+                    c_port:          matches[2],
+                    c_address:       matches[3],
+                    c_serial:        db_c_serial,
+                    c_type:          db_c_type,
+                    c_tz:            db_c_tz,
+                    wg:              &wg,
+                    control_ch:      make(chan string, 1),
+                    data_ch:         data_ch,
+                    check:           cycle_start,
+                    added:           time.Now(),
+                    location:        time_location,
+                  }
 
-                wg.Add(1)
-                go worker(workers[db_c_id])
+                  wg.Add(1)
+                  go worker(workers[db_c_id])
+                }
               } else {
                 logError("main", "Bad connect string for: ",db_c_id," :",db_c_connect)
+                ts := time.Now().Unix()
+                db.Exec("UPDATE cs SET c_error=?, c_last_error=? WHERE c_id=?", "Bad connect string", ts, db_c_id)
               }
             }
           }
@@ -268,25 +281,10 @@ MAIN_LOOP: for { //main loop
           var err error
 
           if(data.ret_type == r_data) {
-            err,db_err := processData(data, wd)
-            if( err != nil) {
-              logError("main", err.Error())
-              if(db_err != nil) {
-                logError("main: Data Process DB error:", err.Error())
-              } else {
-                _, db_err =db.Exec("UPDATE cs SET c_error=?, c_last_error=? WHERE c_id=?", err.Error(), ts, data.c_id)
-                if( db_err != nil) {
-                  logError("main", err.Error())
-                  setStatus("DB UPDATE error: "+err.Error())
-                  db_ok=false
-                }
-              }
-              setStatus("Data Process error: "+err.Error())
-            }
+            db_err := processData(data, wd)
             if( db_err != nil) {
               db_ok=false
-            }
-            if err == nil && db_err == nil {
+            } else {
               _, err =db.Exec("UPDATE cs SET c_last_ok=? WHERE c_id=?", ts, data.c_id)
               if( err != nil) {
                 logError("main", err.Error())
