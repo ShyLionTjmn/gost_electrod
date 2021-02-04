@@ -39,6 +39,7 @@ var opt_d bool= false
 var opt_D bool= false
 var opt_r bool= false
 var opt_i string
+var opt_b string
 
 var db *sql.DB=nil
 var db_ok bool=false
@@ -91,6 +92,8 @@ func main() {
   var f_opt_r *bool = flag.Bool("r", opt_r, "Read only mode (do not update mysql tables)")
   var f_opt_i *string = flag.String("i", opt_i, "Work only this IP")
 
+  var f_opt_b *string = flag.String("b", DSN, "Database DSN")
+
   var f_opt_R *string = flag.String("R", RRD_ROOT, "RRD root dir, should be in rrdcached -b option path")
   var f_opt_S *string = flag.String("S", RRD_SOCKET, "RRD socket")
 
@@ -106,6 +109,7 @@ func main() {
   opt_i = *f_opt_i
   opt_R = *f_opt_R
   opt_S = *f_opt_S
+  opt_b = *f_opt_b
 
   sig_ch := make(chan os.Signal, 1)
 
@@ -133,7 +137,7 @@ MAIN_LOOP: for { //main loop
     //open db if not open
     if(db == nil) {
       var err error
-      db, err = sql.Open("mysql", DSN)
+      db, err = sql.Open("mysql", opt_b)
       if( err != nil ) {
         logError("main", err.Error())
         setStatus("DB Open error: "+err.Error())
@@ -160,7 +164,7 @@ MAIN_LOOP: for { //main loop
 
     if(db_ok) {
       //query cs table to check for new/paused cs
-      query := "SELECT c_id, c_connect, c_serial, c_type, c_tz FROM cs WHERE c_paused = 0 AND c_deleted = 0 AND c_type = 'gost-c-electro-1p'"
+      query := "SELECT c_id, c_connect, c_serial, c_type, c_tz FROM cs WHERE c_paused = 0 AND c_deleted = 0 AND (c_type = 'gost-c-electro-1p' OR c_type = 'gost-c-electro-3p')"
       if( opt_i != "" && ip_regex.MatchString(opt_i)) {
         query += " AND c_connect LIKE '"+opt_i+":%'"
       }
@@ -235,7 +239,7 @@ MAIN_LOOP: for { //main loop
                   go worker(workers[db_c_id])
                 }
               } else {
-                logError("main", "Bad connect string for: ",db_c_id," :",db_c_connect)
+                if opt_d { logError("main", "Bad connect string for: ",db_c_id," :",db_c_connect) }
                 ts := time.Now().Unix()
                 db.Exec("UPDATE cs SET c_error=?, c_last_error=? WHERE c_id=?", "Bad connect string", ts, db_c_id)
               }
@@ -304,7 +308,7 @@ MAIN_LOOP: for { //main loop
               }
             }
           } else if(data.ret_type == r_serial) {
-            fmt.Println("Got serial from",data.c_id,data.str)
+            if opt_d { fmt.Println("Got serial from",data.c_id,data.str) }
 
             if(workers[data.c_id].c_serial != data.str) {
               if(workers[data.c_id].c_serial == "auto") {
@@ -330,7 +334,7 @@ MAIN_LOOP: for { //main loop
               db_ok=false
             }
           } else {
-            fmt.Println("Got something from %d: %v\n", data.c_id, data)
+            if opt_d { fmt.Println("Got something from %d: %v\n", data.c_id, data) }
           }
         } else {
           if(data.ret_type == r_data) {

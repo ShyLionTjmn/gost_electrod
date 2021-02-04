@@ -20,7 +20,7 @@ func worker(ws t_workStruct) {
 
   var err_str string
   result_map := make(map[string]string)
-  commands := []string{"TIME_()", "DATE_()", "MODEL()", "IDPAS()", "ET0PE(1)", "ET0PE(2)", "ET0PE(3)", "VOLTA(1)", "CURRE(1)"}
+  commands := []string{"TIME_()", "DATE_()", "MODEL()", "IDPAS()", "HIDEG()", "ET0PE(1)", "ET0PE(2)", "ET0PE(3)", "VOLTA(1)", "CURRE(1)"}
   if ws.c_type == "gost-c-electro-3p" {
     commands = append(commands, "VOLTA(2)", "CURRE(2)", "VOLTA(3)", "CURRE(3)")
   }
