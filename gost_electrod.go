@@ -28,6 +28,12 @@ const (
   r_debug       t_scanType = iota //in str
 )
 
+const RRD_ROOT="/ssd/rrd/counters"
+const RRD_SOCKET="/var/run/rrdcached.sock"
+
+var opt_R string
+var opt_S string
+
 
 var opt_d bool= false
 var opt_D bool= false
@@ -85,6 +91,9 @@ func main() {
   var f_opt_r *bool = flag.Bool("r", opt_r, "Read only mode (do not update mysql tables)")
   var f_opt_i *string = flag.String("i", opt_i, "Work only this IP")
 
+  var f_opt_R *string = flag.String("R", RRD_ROOT, "RRD root dir, should be in rrdcached -b option path")
+  var f_opt_S *string = flag.String("S", RRD_SOCKET, "RRD socket")
+
   ip_regex := regexp.MustCompile("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$")
   connect_regex := regexp.MustCompile("^([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}):([0-9]{1,5})(?:/([0-9a-zA-Z]+))?$")
   snumb_regex = regexp.MustCompile("^SNUMB\\(([0-9a-zA-Z]+)\\)\r\n$")
@@ -95,6 +104,8 @@ func main() {
   opt_D = *f_opt_D
   opt_r = *f_opt_r
   opt_i = *f_opt_i
+  opt_R = *f_opt_R
+  opt_S = *f_opt_S
 
   sig_ch := make(chan os.Signal, 1)
 

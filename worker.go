@@ -6,7 +6,7 @@ import (
   "github.com/ShyLionTjmn/GOST-61107-TCP"
 )
 
-const SCAN_INTERVAL = 15*time.Second
+const SCAN_INTERVAL = 60*time.Second
 
 func worker(ws t_workStruct) {
   if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "started") }

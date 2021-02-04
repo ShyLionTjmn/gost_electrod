@@ -4,6 +4,10 @@ import (
   "time"
   "regexp"
   "math"
+  "strings"
+  rrd "github.com/multiplay/go-rrd"
+  "fmt"
+  "os"
 )
 
 var time_regex *regexp.Regexp
@@ -28,6 +32,8 @@ func processData(data t_scanData, ws t_workStruct) (error) {
   if opt_d { logMessage("ts:", ts); }
 
   warn_str := ""
+
+  rrd_queue := make(map[string]string)
 
   time_val, t_ok := data.data["TIME_()"]
   date_val, d_ok := data.data["DATE_()"]
@@ -94,8 +100,69 @@ func processData(data t_scanData, ws t_workStruct) (error) {
           key == "VOLTA(1)" || key == "VOLTA(2)" || key == "VOLTA(3)" ||
           key == "CURRE(1)" || key == "CURRE(2)" || key == "CURRE(3)") &&
          num_regex.MatchString(value) {
-        logMessage("Graph key ", key, ":", value)
+
+        rrd_queue[key] = value
       }
+
+    }
+  }
+
+  if !opt_r && len(rrd_queue) > 0 {
+    rrdc, rrdc_err := rrd.NewClient(opt_S, rrd.Unix)
+
+    if rrdc_err != nil {
+      if opt_d { logError("Error connecting to rrdcached", rrdc_err.Error()) }
+      warn_str += "Error connecting to rrdcached\n"
+    } else {
+
+      for key, value := range rrd_queue {
+        graph_key := strings.ReplaceAll(key, "(", "_")
+        graph_key = strings.ReplaceAll(graph_key, ")", "_")
+
+        rrd_file := opt_R + "/" + fmt.Sprintf("%08d", data.c_id) + "_" + graph_key + "_abs.rrd"
+        if opt_d { logMessage("Graph file ", rrd_file, ":", value) }
+
+        _, stat_err := os.Stat(rrd_file)
+        if stat_err != nil {
+          _, rrd_err := rrdc.Exec("CREATE "+rrd_file+" -s 60 -O DS:"+graph_key+"_abs:GAUGE:120:U:U RRA:MIN:0.5:1:133920 RRA:MIN:0.5:10:26784 RRA:MIN:0.5:60:8928")
+          if rrd_err != nil {
+            if opt_d { logError("RRD error:", rrd_err.Error()) }
+            warn_str += "RRD error: "+rrd_err.Error()+"\n"
+            break
+          }
+        }
+
+        rrd_err := rrdc.Update(rrd_file, rrd.NewUpdate(now, value))
+        if rrd_err != nil {
+          if opt_d { logError("RRD error:", rrd_err.Error()) }
+          warn_str += "RRD error: "+rrd_err.Error()+"\n"
+          break
+        }
+
+
+
+        if len(key) >= 5 && key[:5] == "ET0PE" {
+          rrd_file := opt_R + "/" + fmt.Sprintf("%08d", data.c_id) + "_" + graph_key + "_inc.rrd"
+          if opt_d { logMessage("Graph file ", rrd_file, ":", value) }
+
+          _, stat_err := os.Stat(rrd_file)
+          if stat_err != nil {
+            _, rrd_err := rrdc.Exec("CREATE "+rrd_file+" -s 60 -O DS:"+graph_key+"_inc:COUNTER:120:U:U RRA:AVERAGE:0.5:1:133920 RRA:AVERAGE:0.5:10:26784 RRA:AVERAGE:0.5:60:8928")
+            if rrd_err != nil {
+              if opt_d { logError("RRD error:", rrd_err.Error()) }
+              warn_str += "RRD error: "+rrd_err.Error()+"\n"
+              break
+            }
+          }
+          rrd_err := rrdc.Update(rrd_file, rrd.NewUpdate(now, value))
+          if rrd_err != nil {
+            if opt_d { logError("RRD error:", rrd_err.Error()) }
+            warn_str += "RRD error: "+rrd_err.Error()+"\n"
+            break
+          }
+        }
+      }
+      rrdc.Close()
     }
   }
 
