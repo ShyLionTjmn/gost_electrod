@@ -312,7 +312,7 @@ MAIN_LOOP: for { //main loop
 
             if(workers[data.c_id].c_serial != data.str) {
               if(workers[data.c_id].c_serial == "auto") {
-                _, err =db.Exec("UPDATE cs SET ts=?, c_serial=?, change_by = 'daemon'  WHERE c_id=?", ts, data.str, data.c_id)
+                _, err =db.Exec("UPDATE cs SET c_serial=? WHERE c_id=?", data.str, data.c_id)
                 if( err != nil) {
                   logError("main", err.Error())
                   setStatus("DB UPDATE error: "+err.Error())

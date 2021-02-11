@@ -85,7 +85,11 @@ MAIN_CYCLE:
           // serial mismatch, send to main thread and wait for relaunch
           if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "sending serial to main thread") }
           ws.data_ch <- t_scanData{c_id: ws.c_id, str: matches[1], ret_type: r_serial, added: ws.added}
-          err_str = "Serial mismatch"
+          if ws.c_serial != "auto" {
+            err_str = "Serial mismatch"
+          } else {
+            err_str = "Autoserial"
+          }
         }
       }
     }
@@ -115,18 +119,15 @@ MAIN_CYCLE:
     if err_str == "" {
       if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "sending data to main thread") }
       ws.data_ch <- t_scanData{c_id: ws.c_id, data: result_map, ret_type: r_data, added: ws.added}
-    } else if !first_cycle || err_str == "Serial mismatch" {
+    } else if (!first_cycle || err_str == "Serial mismatch") && err_str != "Autoserial" {
       if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "error:", err_str) }
       ws.data_ch <- t_scanData{c_id: ws.c_id, str: err_str, ret_type: r_error, added: ws.added}
     }
 
     elapsed = time.Now().Sub( cycle_start )
 
-    if err_str == "Serial mismatch" {
-      timer = time.NewTimer( 24*time.Hour )
-    } else {
-      timer = time.NewTimer( SCAN_INTERVAL - elapsed )
-    }
+    timer = time.NewTimer( SCAN_INTERVAL - elapsed )
+
     time.Sleep(time.Millisecond)
 
     if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "sleeping") }
