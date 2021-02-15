@@ -8,9 +8,11 @@ import (
   "os/signal"
   "time"
   "flag"
+  "log"
   "regexp"
   "database/sql"
   _ "github.com/go-sql-driver/mysql"
+  "github.com/marcsauter/single"
 )
 
 const DSN= "counterd:counterd@unix(/var/lib/mysql/mysql.sock)/counters"
@@ -86,6 +88,19 @@ type t_workStruct struct {
 var snumb_regex *regexp.Regexp
 
 func main() {
+
+
+  single_run := single.New("gost_electrod")
+  sr_err := single_run.CheckLock();
+
+  if sr_err != nil && sr_err == single.ErrAlreadyRunning {
+    log.Fatal("another instance of the app is already running, exiting")
+  } else if sr_err != nil {
+    // Another error occurred, might be worth handling it as well
+    log.Fatalf("failed to acquire exclusive app lock: %v", sr_err)
+  }
+  defer single_run.TryUnlock()
+
 
   var f_opt_d *bool = flag.Bool("d", opt_d, "Debug output")
   var f_opt_D *bool = flag.Bool("D", opt_D, "Debug packet output")

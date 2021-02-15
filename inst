@@ -1,0 +1,8 @@
+#!/bin/sh
+
+PROG=gost_electrod
+
+systemctl stop $PROG
+cp -f $PROG /usr/local/sbin
+systemctl start $PROG
+systemctl status $PROG

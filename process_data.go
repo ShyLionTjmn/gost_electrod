@@ -147,7 +147,7 @@ func processData(data t_scanData, ws t_workStruct) (error) {
 
           _, stat_err := os.Stat(rrd_file)
           if stat_err != nil {
-            _, rrd_err := rrdc.Exec("CREATE "+rrd_file+" -s 60 -O DS:"+graph_key+"_inc:COUNTER:120:U:U RRA:AVERAGE:0.5:1:133920 RRA:AVERAGE:0.5:10:26784 RRA:AVERAGE:0.5:60:8928")
+            _, rrd_err := rrdc.Exec("CREATE "+rrd_file+" -s 60 -O DS:"+graph_key+"_inc:DCOUNTER:120:U:U RRA:AVERAGE:0.5:1:133920 RRA:AVERAGE:0.5:10:26784 RRA:AVERAGE:0.5:60:8928")
             if rrd_err != nil {
               if opt_d { logError("RRD error:", rrd_err.Error()) }
               warn_str += "RRD error: "+rrd_err.Error()+"\n"
