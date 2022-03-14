@@ -179,7 +179,7 @@ MAIN_LOOP: for { //main loop
 
     if(db_ok) {
       //query cs table to check for new/paused cs
-      query := "SELECT c_id, c_connect, c_serial, c_type, c_tz FROM cs WHERE c_paused = 0 AND c_deleted = 0 AND (c_type = 'gost-c-electro-1p' OR c_type = 'gost-c-electro-3p')"
+      query := "SELECT c_id, c_connect, c_serial, c_type, c_tz FROM cs WHERE c_paused = 0 AND c_deleted = 0 AND (c_type = 'gost-c-electro-1p' OR c_type = 'gost-c-electro-3p' OR c_type = 'gost-c-electro-3p-EM301')"
       if( opt_i != "" && ip_regex.MatchString(opt_i)) {
         query += " AND c_connect LIKE '"+opt_i+":%'"
       }

@@ -1,14 +1,28 @@
 package main
 
 import (
-  _ "fmt"
+  "fmt"
+  "strings"
   "time"
+  "regexp"
   "github.com/ShyLionTjmn/GOST-61107-TCP"
 )
 
 const SCAN_INTERVAL = 60*time.Second
 
+var ET0PE_EM301_reg *regexp.Regexp
+var VOLTA_EM301_reg *regexp.Regexp
+var CURRE_EM301_reg *regexp.Regexp
+
+func init() {
+  ET0PE_EM301_reg = regexp.MustCompile(`^ET0PE\((\d+(?:\.\d+)?)\)\((\d+(?:\.\d+)?)\)\((\d+(?:\.\d+)?)\)\((\d+(?:\.\d+)?)\)\((\d+(?:\.\d+)?)\)\((\d+(?:\.\d+)?)\)$`)
+                                       //ET0PE(2.8235509)(2.6742464)(0.1493045)(0.0)(0.0)(0.0)
+  VOLTA_EM301_reg = regexp.MustCompile(`^VOLTA\((\d+(?:\.\d+)?)\)\((\d+(?:\.\d+)?)\)\((\d+(?:\.\d+)?)\)$`)
+  CURRE_EM301_reg = regexp.MustCompile(`^CURRE\((\d+(?:\.\d+)?)\)\((\d+(?:\.\d+)?)\)\((\d+(?:\.\d+)?)\)$`)
+}
+
 func worker(ws t_workStruct) {
+  _ = fmt.Sprint()
   if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "started") }
   defer ws.wg.Done()
 
@@ -20,9 +34,15 @@ func worker(ws t_workStruct) {
 
   var err_str string
   result_map := make(map[string]string)
-  commands := []string{"TIME_()", "DATE_()", "MODEL()", "IDPAS()", "HIDEG()", "ET0PE(1)", "ET0PE(2)", "ET0PE(3)", "VOLTA(1)", "CURRE(1)"}
-  if ws.c_type == "gost-c-electro-3p" {
+  commands := []string{"TIME_()", "DATE_()", "MODEL()", "IDPAS()"}
+
+  if ws.c_type == "gost-c-electro-1p" {
+    commands = append(commands, "HIDEG()", "ET0PE(1)", "ET0PE(2)", "ET0PE(3)", "VOLTA(1)", "CURRE(1)")
+  } else if ws.c_type == "gost-c-electro-3p" {
+    commands = append(commands, "HIDEG()", "ET0PE(1)", "ET0PE(2)", "ET0PE(3)", "VOLTA(1)", "CURRE(1)")
     commands = append(commands, "VOLTA(2)", "CURRE(2)", "VOLTA(3)", "CURRE(3)")
+  } else if ws.c_type == "gost-c-electro-3p-EM301" {
+    commands = append(commands, "ET0PE()", "VOLTA()", "CURRE()")
   }
 
   var qres *GOST_61107_TCP.Message
@@ -106,7 +126,43 @@ MAIN_CYCLE:
           err_str = "Query error: "+err.Error()
         } else {
           if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "reply:", qres.Body) }
-          result_map[cmd] = qres.Body
+          if ws.c_type == "gost-c-electro-3p-EM301" {
+            if cmd == "ET0PE()" {
+              body := strings.ReplaceAll(qres.Body, "\x0d\x0a", "")
+              regres := ET0PE_EM301_reg.FindStringSubmatch(body)
+              if regres == nil {
+                err_str = "ET0PE parse error"
+              } else {
+                result_map["ET0PE(1)"] = regres[1]
+                result_map["ET0PE(2)"] = regres[2]
+                result_map["ET0PE(3)"] = regres[3]
+              }
+            } else if cmd == "VOLTA()" {
+              body := strings.ReplaceAll(qres.Body, "\x0d\x0a", "")
+              regres := VOLTA_EM301_reg.FindStringSubmatch(body)
+              if regres == nil {
+                err_str = "VOLTA parse error"
+              } else {
+                result_map["VOLTA(1)"] = regres[1]
+                result_map["VOLTA(2)"] = regres[2]
+                result_map["VOLTA(3)"] = regres[3]
+              }
+            } else if cmd == "CURRE()" {
+              body := strings.ReplaceAll(qres.Body, "\x0d\x0a", "")
+              regres := CURRE_EM301_reg.FindStringSubmatch(body)
+              if regres == nil {
+                err_str = "CURRE parse error"
+              } else {
+                result_map["CURRE(1)"] = regres[1]
+                result_map["CURRE(2)"] = regres[2]
+                result_map["CURRE(3)"] = regres[3]
+              }
+            } else {
+              result_map[cmd] = qres.Body
+            }
+          } else {
+            result_map[cmd] = qres.Body
+          }
         }
       }
     }
