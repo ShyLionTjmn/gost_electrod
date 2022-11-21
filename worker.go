@@ -9,6 +9,7 @@ import (
 )
 
 const SCAN_INTERVAL = 60*time.Second
+const DEV_TIMEOUT = 10*time.Second
 
 var ET0PE_EM301_reg *regexp.Regexp
 var VOLTA_EM301_reg *regexp.Regexp
@@ -27,7 +28,7 @@ func worker(ws t_workStruct) {
   defer ws.wg.Done()
 
   var err error
-  dev := GOST_61107_TCP.Init(ws.c_ip, ws.c_port, ws.c_address, "1", time.Second, ws.control_ch)
+  dev := GOST_61107_TCP.Init(ws.c_ip, ws.c_port, ws.c_address, "1", DEV_TIMEOUT, ws.control_ch)
   dev.Debug=opt_D
 
   defer func() { if dev.Connected { dev.Close() } }()
