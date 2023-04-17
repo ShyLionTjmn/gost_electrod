@@ -125,6 +125,7 @@ MAIN_CYCLE:
         if err != nil {
           if err.Error() == "exit signalled" { break MAIN_CYCLE }
           err_str = "Query error: "+err.Error()
+          break
         } else {
           if(opt_d) { logMessage("worker", ws.c_id,"ip:", ws.c_connect, "reply:", qres.Body) }
           if ws.c_type == "gost-c-electro-3p-EM301" {
